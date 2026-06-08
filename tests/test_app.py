@@ -1,11 +1,12 @@
 """App tests — display helpers and `run` with the pipeline mocked (no gradio, no weights)."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 import app as app_mod
-from app import _render_source_html, _to_highlighted, run
+from app import _export_json, _render_source_html, _to_highlighted, run
 from sumlens.types import (
     AnalysisConfig,
     AnalysisResult,
@@ -220,3 +221,29 @@ def test_on_sentence_select_out_of_range_returns_plain_source() -> None:
     result = _result()
     html = _render_source_html(result.document, set())
     assert "<mark" not in html
+
+
+# ---------------------------------------------------------------------------
+# F5 — export JSON
+# ---------------------------------------------------------------------------
+
+
+def test_export_json_returns_none_without_result() -> None:
+    assert _export_json(None) is None
+
+
+def test_export_json_creates_valid_file() -> None:
+    result = _result()
+    path = _export_json(result)
+    assert path is not None
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert AnalysisResult.model_validate(data) == result
+
+
+def test_export_json_schema_has_required_fields() -> None:
+    path = _export_json(_result())
+    assert path is not None
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert {"document", "summary", "verdicts", "config"} <= data.keys()
+    verdict = data["verdicts"][0]
+    assert {"sentence_id", "fused_score", "label", "signals", "evidence"} <= verdict.keys()

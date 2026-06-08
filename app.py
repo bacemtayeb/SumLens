@@ -7,6 +7,7 @@ input, runs the pipeline, and shapes the result for display.
 from __future__ import annotations
 
 import html as _html
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,19 @@ def _render_source_html(document: Document, highlighted_ids: set[str]) -> str:
         else:
             parts.append(safe)
     return "<p style='line-height:1.8'>" + " ".join(parts) + "</p>"
+
+
+def _export_json(result: AnalysisResult | None) -> str | None:
+    if result is None:
+        return None
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    )
+    try:
+        tmp.write(result.model_dump_json(indent=2))
+    finally:
+        tmp.close()
+    return tmp.name
 
 
 def run(
@@ -119,22 +133,27 @@ def build_app() -> Any:
                 type="filepath",
             )
 
-        submit = gr.Button("Analyse", variant="primary")
+        with gr.Row():
+            submit = gr.Button("Analyse", variant="primary")
+            json_dl = gr.DownloadButton("Export JSON", visible=False)
+
         error_box = gr.Markdown(value="", visible=False)
 
-        with gr.Accordion("Full result (JSON export)", open=False):
+        with gr.Accordion("Full result (JSON viewer)", open=False):
             json_out = gr.JSON(label="AnalysisResult")
 
         def _handle(
             text: str, pdf_file: str | None
-        ) -> tuple[Any, Any, Any, Any, Any, Any]:
+        ) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
             try:
                 result, source_html, highlighted, payload = run(text, pdf_file)
+                json_path = _export_json(result)
                 return (
                     result,
                     source_html,
                     highlighted,
                     payload,
+                    gr.update(value=json_path, visible=True),
                     gr.update(value="", visible=False),
                     gr.update(interactive=True),
                 )
@@ -144,6 +163,7 @@ def build_app() -> Any:
                     _SOURCE_PLACEHOLDER,
                     None,
                     None,
+                    gr.update(visible=False),
                     gr.update(value=f"**Error:** {exc}", visible=True),
                     gr.update(interactive=True),
                 )
@@ -173,7 +193,10 @@ def build_app() -> Any:
         ).then(
             fn=_handle,
             inputs=[text_in, pdf_in],
-            outputs=[result_state, source_html_out, summary_out, json_out, error_box, submit],
+            outputs=[
+                result_state, source_html_out, summary_out,
+                json_out, json_dl, error_box, submit,
+            ],
         )
 
         summary_out.select(
