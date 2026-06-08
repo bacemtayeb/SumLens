@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+.venv-gpu/
+venv/
+
+# Tooling / editors (not part of the project)
+.claude/
+.idea/
+.vscode/
+
+# Data & model artifacts (not committed)
+data/
+nltk_data/
+features*.csv
+ablation.csv
+models/*.pkl
+
+# Logs
+*.log
+logs/
+
+# Node / frontend
+node_modules/
+dist/
+build/

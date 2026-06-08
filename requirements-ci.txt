@@ -1,0 +1,13 @@
+# Light dependency set for CI: only what the test suite actually executes.
+# Heavy model libs (torch, transformers, inseq, lettucedetect, gradio) are mocked
+# at the module boundary in tests, so CI never installs them — fast and reliable.
+pydantic>=2
+pdfplumber
+nltk
+matplotlib
+scikit-learn
+fpdf2
+pytest
+pytest-cov
+ruff
+mypy
