@@ -6,6 +6,7 @@ input, runs the pipeline, and shapes the result for display.
 
 from __future__ import annotations
 
+import html as _html
 from pathlib import Path
 from typing import Any
 
@@ -44,16 +45,17 @@ def _to_highlighted(result: AnalysisResult) -> list[tuple[str, str]]:
 def _render_source_html(document: Document, highlighted_ids: set[str]) -> str:
     """Source sentences as HTML; sentences in highlighted_ids get a yellow mark."""
     if not document.sentences:
-        return f"<p style='line-height:1.8'>{document.raw_text}</p>"
+        return f"<p style='line-height:1.8'>{_html.escape(document.raw_text)}</p>"
     parts = []
     for sentence in document.sentences:
+        safe = _html.escape(sentence.text)
         if sentence.id in highlighted_ids:
             parts.append(
                 f"<mark style='background:#fde68a;border-radius:3px;"
-                f"padding:1px 3px'>{sentence.text}</mark>"
+                f"padding:1px 3px'>{safe}</mark>"
             )
         else:
-            parts.append(sentence.text)
+            parts.append(safe)
     return "<p style='line-height:1.8'>" + " ".join(parts) + "</p>"
 
 
