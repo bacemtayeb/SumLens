@@ -4,10 +4,14 @@ import nltk
 
 
 def _ensure_punkt() -> None:
-    try:
-        nltk.data.find("tokenizers/punkt/english.pickle")
-    except LookupError:
-        nltk.download("punkt", quiet=True)
+    for resource, package in [
+        ("tokenizers/punkt/english.pickle", "punkt"),
+        ("tokenizers/punkt_tab/english/", "punkt_tab"),
+    ]:
+        try:
+            nltk.data.find(resource)
+        except LookupError:
+            nltk.download(package, quiet=True)
 
 
 _ensure_punkt()
