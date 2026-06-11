@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import app as app_mod
-from app import _export_json, _render_source_html, _to_highlighted, run
+from app import _apply_tau, _export_json, _render_source_html, _to_highlighted, run
 from sumlens.types import (
     AnalysisConfig,
     AnalysisResult,
@@ -221,6 +221,55 @@ def test_on_sentence_select_out_of_range_returns_plain_source() -> None:
     result = _result()
     html = _render_source_html(result.document, set())
     assert "<mark" not in html
+
+
+# ---------------------------------------------------------------------------
+# F5 — export JSON
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# F4 — adjustable threshold τ
+# ---------------------------------------------------------------------------
+
+
+def test_apply_tau_returns_none_without_result() -> None:
+    assert _apply_tau(None, 0.70, 0.30) is None
+
+
+def test_apply_tau_mirrors_fuse_label_logic() -> None:
+    result = _result()
+    # fused_score=0.9 → grounded at any reasonable tau
+    # fused_score=0.1 → hallucinated at any reasonable tau
+    spans = _apply_tau(result, 0.70, 0.30)
+    assert spans is not None
+    assert spans[0] == ("Grounded one. ", "grounded")
+    assert spans[1] == ("Bad two. ", "hallucinated")
+
+
+def test_apply_tau_relabels_without_model_rerun() -> None:
+    result = _result()
+    # Raise tau_grounded to 0.95 → fused_score=0.9 falls into "weak"
+    spans = _apply_tau(result, 0.95, 0.30)
+    assert spans is not None
+    assert spans[0][1] == "weak"       # was grounded, now weak
+    assert spans[1][1] == "hallucinated"  # unchanged
+
+
+def test_apply_tau_boundary_score_lt_tau_h_is_hallucinated() -> None:
+    result = _result()
+    # fused_score=0.1 < tau_hallucinated=0.15 → hallucinated
+    spans = _apply_tau(result, 0.70, 0.15)
+    assert spans is not None
+    assert spans[1][1] == "hallucinated"
+
+
+def test_apply_tau_boundary_score_gte_tau_g_is_grounded() -> None:
+    result = _result()
+    # fused_score=0.9 >= tau_grounded=0.85 → grounded
+    spans = _apply_tau(result, 0.85, 0.30)
+    assert spans is not None
+    assert spans[0][1] == "grounded"
 
 
 # ---------------------------------------------------------------------------
