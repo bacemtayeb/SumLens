@@ -60,6 +60,26 @@ def _render_source_html(document: Document, highlighted_ids: set[str]) -> str:
     return "<p style='line-height:1.8'>" + " ".join(parts) + "</p>"
 
 
+def _apply_tau(
+    result: AnalysisResult | None,
+    tau_grounded: float,
+    tau_hallucinated: float,
+) -> list[tuple[str, str]] | None:
+    """Re-label summary sentences from stored fused scores without re-running the model."""
+    if result is None:
+        return None
+    scores = {v.sentence_id: v.fused_score for v in result.verdicts}
+
+    def _label(score: float) -> str:
+        if score < tau_hallucinated:
+            return "hallucinated"
+        if score >= tau_grounded:
+            return "grounded"
+        return "weak"
+
+    return [(f"{s.text} ", _label(scores.get(s.id, 0.5))) for s in result.summary.sentences]
+
+
 def _export_json(result: AnalysisResult | None) -> str | None:
     if result is None:
         return None
@@ -120,6 +140,16 @@ def build_app() -> Any:
                     combine_adjacent=False,
                     show_legend=True,
                 )
+
+        with gr.Row():
+            tau_h_slider = gr.Slider(
+                minimum=0.0, maximum=1.0, value=0.30, step=0.05,
+                label="τ hallucinated — below this → hallucinated (default 0.30)",
+            )
+            tau_g_slider = gr.Slider(
+                minimum=0.0, maximum=1.0, value=0.70, step=0.05,
+                label="τ grounded — above this → grounded (default 0.70)",
+            )
 
         with gr.Row():
             text_in = gr.Textbox(
@@ -204,6 +234,13 @@ def build_app() -> Any:
             inputs=[result_state],
             outputs=[source_html_out],
         )
+
+        for slider in (tau_h_slider, tau_g_slider):
+            slider.change(
+                fn=_apply_tau,
+                inputs=[result_state, tau_g_slider, tau_h_slider],
+                outputs=[summary_out],
+            )
 
     return demo
 
