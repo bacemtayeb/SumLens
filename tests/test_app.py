@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import app as app_mod
-from app import _apply_tau, _export_json, _render_source_html, _to_highlighted, run
+from app import _apply_tau, _export_json, _export_pdf, _render_source_html, _to_highlighted, run
 from sumlens.types import (
     AnalysisConfig,
     AnalysisResult,
@@ -296,3 +296,31 @@ def test_export_json_schema_has_required_fields() -> None:
     assert {"document", "summary", "verdicts", "config"} <= data.keys()
     verdict = data["verdicts"][0]
     assert {"sentence_id", "fused_score", "label", "signals", "evidence"} <= verdict.keys()
+
+
+# ---------------------------------------------------------------------------
+# F6 — export PDF
+# ---------------------------------------------------------------------------
+
+
+def test_export_pdf_returns_none_without_result() -> None:
+    assert _export_pdf(None) is None
+
+
+def test_export_pdf_creates_pdf_file() -> None:
+    path = _export_pdf(_result())
+    assert path is not None
+    content = Path(path).read_bytes()
+    assert content.startswith(b"%PDF"), "file must be a valid PDF"
+
+
+def test_export_pdf_contains_summary_text() -> None:
+    import pdfplumber
+
+    result = _result()
+    path = _export_pdf(result)
+    assert path is not None
+    with pdfplumber.open(path) as pdf:
+        text = " ".join(page.extract_text() or "" for page in pdf.pages)
+    for sentence in result.summary.sentences:
+        assert sentence.text[:10] in text

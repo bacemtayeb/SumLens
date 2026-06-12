@@ -80,6 +80,97 @@ def _apply_tau(
     return [(f"{s.text} ", _label(scores.get(s.id, 0.5))) for s in result.summary.sentences]
 
 
+def _latin1(text: str) -> str:
+    """Strip characters outside Latin-1 so fpdf2 core fonts don't error."""
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+_PDF_COLORS: dict[str, tuple[int, int, int]] = {
+    "grounded": (220, 252, 231),
+    "weak": (255, 237, 213),
+    "hallucinated": (254, 226, 226),
+}
+
+
+def _export_pdf(result: AnalysisResult | None) -> str | None:
+    if result is None:
+        return None
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "SumLens Analysis Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", size=9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(
+        0, 6,
+        _latin1(f"Source: {result.document.source}  |  Model: {result.summary.model_name}"),
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 8, "Annotated Summary", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    verdict_map = {v.sentence_id: v for v in result.verdicts}
+    pdf.set_font("Helvetica", size=10)
+    for sentence in result.summary.sentences:
+        verdict = verdict_map.get(sentence.id)
+        label = verdict.label if verdict else "weak"
+        r, g, b = _PDF_COLORS.get(label, (240, 240, 240))
+        pdf.set_fill_color(r, g, b)
+        pdf.multi_cell(0, 7, _latin1(sentence.text), fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(1)
+
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 7, "Legend", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", size=9)
+    for lbl, (r, g, b) in _PDF_COLORS.items():
+        pdf.set_fill_color(r, g, b)
+        pdf.cell(6, 5, "", fill=True)
+        pdf.cell(0, 5, f"  {lbl.capitalize()}", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 7, "Signal Scores", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", size=8)
+    col_w = [80, 25, 20, 22, 15, 22]
+    headers = ["Sentence", "Label", "Fused", "Classifier", "NLI", "Attribution"]
+    for w, h in zip(col_w, headers, strict=True):
+        pdf.cell(w, 6, h, border=1)
+    pdf.ln()
+    for sentence in result.summary.sentences:
+        v = verdict_map.get(sentence.id)
+        if v is None:
+            continue
+        truncated = sentence.text[:45] + "..." if len(sentence.text) > 45 else sentence.text
+        row = [
+            _latin1(truncated),
+            v.label,
+            f"{v.fused_score:.2f}",
+            f"{v.signals.classifier:.2f}" if v.signals.classifier is not None else "-",
+            f"{v.signals.nli:.2f}" if v.signals.nli is not None else "-",
+            f"{v.signals.attribution:.2f}" if v.signals.attribution is not None else "-",
+        ]
+        for w, cell in zip(col_w, row, strict=True):
+            pdf.cell(w, 6, cell, border=1)
+        pdf.ln()
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    try:
+        pdf.output(tmp.name)
+    finally:
+        tmp.close()
+    return tmp.name
+
+
 def _export_json(result: AnalysisResult | None) -> str | None:
     if result is None:
         return None
@@ -166,6 +257,7 @@ def build_app() -> Any:
         with gr.Row():
             submit = gr.Button("Analyse", variant="primary")
             json_dl = gr.DownloadButton("Export JSON", visible=False)
+            pdf_dl = gr.DownloadButton("Export PDF", visible=False)
 
         error_box = gr.Markdown(value="", visible=False)
 
@@ -174,16 +266,18 @@ def build_app() -> Any:
 
         def _handle(
             text: str, pdf_file: str | None
-        ) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
+        ) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
             try:
                 result, source_html, highlighted, payload = run(text, pdf_file)
                 json_path = _export_json(result)
+                pdf_path = _export_pdf(result)
                 return (
                     result,
                     source_html,
                     highlighted,
                     payload,
                     gr.update(value=json_path, visible=True),
+                    gr.update(value=pdf_path, visible=True),
                     gr.update(value="", visible=False),
                     gr.update(interactive=True),
                 )
@@ -193,6 +287,7 @@ def build_app() -> Any:
                     _SOURCE_PLACEHOLDER,
                     None,
                     None,
+                    gr.update(visible=False),
                     gr.update(visible=False),
                     gr.update(value=f"**Error:** {exc}", visible=True),
                     gr.update(interactive=True),
@@ -225,7 +320,7 @@ def build_app() -> Any:
             inputs=[text_in, pdf_in],
             outputs=[
                 result_state, source_html_out, summary_out,
-                json_out, json_dl, error_box, submit,
+                json_out, json_dl, pdf_dl, error_box, submit,
             ],
         )
 
