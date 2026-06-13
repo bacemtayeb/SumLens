@@ -1,0 +1,70 @@
+@startuml use-case
+' UC-01 "Verify a Summary" + extensions
+' Actors/use cases from requirements.md §7
+
+left to right direction
+skinparam packageStyle rectangle
+skinparam usecase {
+  BackgroundColor White
+  BorderColor #555
+  ArrowColor #555
+}
+
+' ── Actors ──────────────────────────────────────────────────────────────────
+actor "Journalist\n(P1)" as P1
+actor "Policy Analyst\n(P2)" as P2
+actor "Financial Analyst\n(P3)" as P3
+
+' ── System boundary ─────────────────────────────────────────────────────────
+rectangle "SumLens" {
+
+  ' Primary use case
+  usecase "UC-01\nVerify a Summary" as UC01
+
+  ' ── Included steps (always executed as part of UC-01) ────────────────────
+  usecase "Submit Document\n(FR-01 / FR-02)" as UC_Submit
+  usecase "Validate Input\n(FR-01 / FR-02 / FR-04)" as UC_Validate
+  usecase "Summarise Document\n(FR-05 / FR-06)" as UC_Summarise
+  usecase "Compute & Fuse Signals\n(FR-07 / FR-08 / FR-09 / FR-10)" as UC_Signals
+  usecase "Render Annotated\nHeatmap\n(FR-12 / FR-14 / FR-15)" as UC_Heatmap
+
+  ' ── Optional extensions (user-initiated after viewing results) ───────────
+  usecase "Trace Source Spans\n(FR-13, US-06)" as UC_Trace
+  usecase "Adjust Threshold τ\n(FR-11, US-05)" as UC_Tau
+  usecase "Export JSON\n(FR-16, US-04)" as UC_JSON
+  usecase "Export PDF\n(FR-17, US-04)" as UC_PDF
+
+  ' ── Error extensions ─────────────────────────────────────────────────────
+  usecase "Handle Invalid Input\n(FR-04, US-08)" as UC_ErrInput
+  usecase "Handle Model Failure\n(NFR-07)" as UC_ErrModel
+}
+
+' ── Actor associations ───────────────────────────────────────────────────────
+P1 --> UC01 : upload PDF\n(US-01)
+P1 --> UC_JSON : export result\n(US-04)
+P1 --> UC_PDF : export result\n(US-04)
+
+P2 --> UC01 : paste text\n(US-07)
+P2 --> UC_Trace : trace ignored spans\n(US-02)
+
+P3 --> UC01 : verify figures\n(US-03)
+P3 --> UC_Tau : tune sensitivity\n(US-05)
+
+' ── Include relationships (base case always invokes these) ──────────────────
+UC01 ..> UC_Submit   : <<include>>
+UC01 ..> UC_Validate : <<include>>
+UC01 ..> UC_Summarise : <<include>>
+UC01 ..> UC_Signals  : <<include>>
+UC01 ..> UC_Heatmap  : <<include>>
+
+' ── Extend relationships (conditional / optional) ───────────────────────────
+UC_Trace  ..> UC01 : <<extend>>\n[user clicks sentence]
+UC_Tau    ..> UC01 : <<extend>>\n[user adjusts slider]
+UC_JSON   ..> UC01 : <<extend>>\n[user requests export]
+UC_PDF    ..> UC01 : <<extend>>\n[user requests export]
+
+' ── Error extensions ────────────────────────────────────────────────────────
+UC_ErrInput ..> UC_Validate  : <<extend>>\n[2a: invalid input]
+UC_ErrModel ..> UC_Summarise : <<extend>>\n[3a: model failure]
+
+@enduml
