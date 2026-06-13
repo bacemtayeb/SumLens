@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SumLens — UI Mockup</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      background: #f8fafc;
+      color: #1e293b;
+      padding: 24px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .header {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header p  { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    .swatch {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border-radius: 2px;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    .green  { background: #86efac; }
+    .orange { background: #fdba74; }
+    .red    { background: #fca5a5; }
+
+    /* ── Two-panel row ────────────────────────────────────────── */
+    .panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .panel {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel h2 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    /* source panel */
+    .source-text {
+      font-size: 13px;
+      line-height: 1.8;
+      color: #334155;
+    }
+    .source-text mark {
+      background: #fde68a;
+      border-radius: 3px;
+      padding: 1px 3px;
+    }
+
+    /* summary panel */
+    .summary-sentence {
+      display: inline;
+      border-radius: 4px;
+      padding: 2px 5px;
+      margin: 2px 0;
+      font-size: 13px;
+      line-height: 2;
+      cursor: pointer;
+    }
+    .sentence-grounded     { background: #bbf7d0; }
+    .sentence-weak         { background: #fed7aa; }
+    .sentence-hallucinated { background: #fecaca; }
+    .sentence-selected     { outline: 2px solid #3b82f6; }
+
+    .signal-scores {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #64748b;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .signal-scores table { width: 100%; border-collapse: collapse; }
+    .signal-scores th, .signal-scores td {
+      text-align: left;
+      padding: 3px 6px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .signal-scores th { font-weight: 600; color: #475569; }
+
+    /* ── Threshold sliders ────────────────────────────────────── */
+    .sliders {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 20px;
+      margin-bottom: 16px;
+      display: flex;
+      gap: 32px;
+      align-items: flex-end;
+    }
+    .slider-group { flex: 1; }
+    .slider-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 6px;
+    }
+    .slider-group input[type=range] { width: 100%; accent-color: #3b82f6; }
+    .slider-value {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 2px;
+      text-align: right;
+    }
+
+    /* ── Input row ────────────────────────────────────────────── */
+    .input-row {
+      display: grid;
+      grid-template-columns: 1fr 260px;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .card label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 6px;
+    }
+    textarea {
+      width: 100%;
+      height: 80px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 13px;
+      color: #64748b;
+      resize: none;
+      background: #f8fafc;
+    }
+    .upload-box {
+      border: 2px dashed #cbd5e1;
+      border-radius: 6px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: #94a3b8;
+      cursor: pointer;
+    }
+
+    /* ── Action bar ───────────────────────────────────────────── */
+    .action-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .btn {
+      padding: 8px 20px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary  { background: #3b82f6; color: #fff; }
+    .btn-outline  { background: #fff; color: #3b82f6; border: 1px solid #3b82f6; }
+    .btn-disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+
+    .status-pill {
+      font-size: 11px;
+      background: #eff6ff;
+      color: #3b82f6;
+      border: 1px solid #bfdbfe;
+      border-radius: 99px;
+      padding: 3px 10px;
+    }
+
+    /* ── Annotation note ──────────────────────────────────────── */
+    .annotation {
+      font-size: 11px;
+      color: #94a3b8;
+      border: 1px dashed #cbd5e1;
+      border-radius: 4px;
+      padding: 3px 8px;
+      display: inline-block;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>SumLens — Summary Faithfulness Dashboard</h1>
+    <p>Paste text or upload a PDF · SumLens summarises it and flags sentences that may be hallucinated</p>
+    <div class="legend">
+      <span><span class="swatch green"></span>Grounded</span>
+      <span><span class="swatch orange"></span>Weakly grounded</span>
+      <span><span class="swatch red"></span>Hallucinated</span>
+      <span style="color:#64748b;font-style:italic;margin-left:auto">
+        Click a summary sentence to highlight its source spans
+      </span>
+    </div>
+  </div>
+
+  <!-- Two-panel view (F2 / F3) -->
+  <div class="panels">
+
+    <!-- Left: source document -->
+    <div class="panel">
+      <h2>Source document</h2>
+      <div class="source-text">
+        The parliament met on Monday to discuss the proposed national budget for the
+        coming fiscal year. <mark>Lawmakers from every party debated the spending
+        priorities for several hours without reaching a clear consensus on the final
+        allocations.</mark> The finance minister presented projections covering health,
+        education, and transport infrastructure across the regions. Several members
+        raised concerns about the long-term sustainability of the proposed deficit
+        levels. No final figure for total expenditure was announced to the press by
+        the end of the day.
+      </div>
+      <div class="annotation">↑ highlighted span: top attributed source sentence for selected summary sentence</div>
+    </div>
+
+    <!-- Right: annotated summary (F2 / F3) -->
+    <div class="panel">
+      <h2>Summary — click a sentence to trace source spans</h2>
+      <div>
+        <span class="summary-sentence sentence-grounded">
+          Parliament debated the national budget on Monday.
+        </span>
+        <span class="summary-sentence sentence-hallucinated sentence-selected">
+          The bill passed with a majority of 312 votes.
+        </span>
+        <span class="summary-sentence sentence-weak">
+          The finance minister outlined spending plans for key sectors.
+        </span>
+        <span class="summary-sentence sentence-grounded">
+          Sustainability of deficit levels was questioned by members.
+        </span>
+      </div>
+      <div class="annotation">↑ blue outline = selected sentence · yellow = attributed source spans</div>
+
+      <!-- Signal scores table -->
+      <div class="signal-scores">
+        <strong>Signal breakdown — "The bill passed with a majority of 312 votes."</strong>
+        <table>
+          <thead>
+            <tr><th>Signal</th><th>Score</th><th>Interpretation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Classifier (A)</td><td>0.91</td><td>high hallucination probability</td></tr>
+            <tr><td>NLI (B)</td><td>0.14</td><td>claim not entailed by source</td></tr>
+            <tr><td>Attribution (C)</td><td>0.22</td><td>low source attribution mass</td></tr>
+            <tr><td><strong>Fused score</strong></td><td><strong>0.12</strong></td><td><strong>→ hallucinated (below τ = 0.30)</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Threshold sliders (F4) -->
+  <div class="sliders">
+    <div class="slider-group">
+      <label>τ hallucinated — below this → hallucinated</label>
+      <input type="range" min="0" max="1" step="0.05" value="0.30" />
+      <div class="slider-value">0.30</div>
+    </div>
+    <div class="slider-group">
+      <label>τ grounded — above this → grounded</label>
+      <input type="range" min="0" max="1" step="0.05" value="0.70" />
+      <div class="slider-value">0.70</div>
+    </div>
+    <div class="annotation" style="align-self:center">
+      Sliders re-flag sentences instantly · no model re-run
+    </div>
+  </div>
+
+  <!-- Input area -->
+  <div class="input-row">
+    <div class="card">
+      <label>Paste text (≤ 10 000 words)</label>
+      <textarea placeholder="Paste your document here…"></textarea>
+    </div>
+    <div class="card">
+      <label>or upload PDF (≤ 5 MB)</label>
+      <div class="upload-box">📄 Click to select a PDF</div>
+    </div>
+  </div>
+
+  <!-- Action bar (F2 / F5 / F6) -->
+  <div class="action-bar">
+    <button class="btn btn-primary">Analyse</button>
+    <button class="btn btn-outline">Export JSON</button>
+    <button class="btn btn-outline">Export PDF</button>
+    <span class="status-pill">⏳ Analysing… (≈ 30–60 s on GPU)</span>
+    <span class="annotation" style="margin-left:auto">
+      Button disabled while pipeline runs · export buttons appear on completion
+    </span>
+  </div>
+
+</body>
+</html>

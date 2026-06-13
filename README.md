@@ -197,6 +197,8 @@ docs/               # requirements, data model, research plan
 - [`docs/requirements.md`](docs/requirements.md) — functional / non-functional requirements, MoSCoW, user stories, traceability.
 - [`docs/data-model.md`](docs/data-model.md) — canonical data types and JSON schema.
 - [`docs/research-plan.md`](docs/research-plan.md) — signals, fusion, evaluation methodology.
+- [`docs/mockup.html`](docs/mockup.html) — static HTML wireframe of the two-panel dashboard UI (open in any browser).
+- [`docs/use-case.puml`](docs/use-case.puml) — PlantUML use-case diagram (UC-01 "Verify a Summary").
 
 ---
 
