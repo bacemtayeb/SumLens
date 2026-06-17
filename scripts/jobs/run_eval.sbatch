@@ -45,7 +45,9 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 # after a crash/timeout resumes instead of redoing finished work) ---
 echo ">>> extract features (train)"; [ -f features_train.csv ] || python scripts/extract_features.py --split train --data-dir data/ragtruth --out features_train.csv
 echo ">>> extract features (test)";  [ -f features_test.csv ]  || python scripts/extract_features.py --split test  --data-dir data/ragtruth --out features_test.csv
-echo ">>> train fusion";             [ -f models/fusion.pkl ]  || python scripts/train_fusion.py --features features_train.csv --out-dir models
+# train_fusion (live model) is intentionally skipped: this experiment compares
+# signals via the ablation, which fits its own per-subset models. Promote a live
+# fusion model only after the ablation shows the new attribution signals help.
 echo ">>> ablation table";           [ -f ablation.csv ]       || python scripts/evaluate.py --train features_train.csv --test features_test.csv --out ablation.csv
 
 echo "=== DONE $(date) ==="
