@@ -22,6 +22,51 @@ def sentence_f1(preds: dict[str, set[str]], golds: dict[str, set[str]]) -> dict[
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
+def roc_auc(scores: list[float], labels: list[int]) -> float:
+    """Threshold-free ROC-AUC (rank-based, ties averaged). `scores` rank the
+    positive class (label 1). Returns 0.0 if either class is absent."""
+    n_pos = sum(labels)
+    n_neg = len(labels) - n_pos
+    if not n_pos or not n_neg:
+        return 0.0
+    order = sorted(zip(scores, labels, strict=True), key=lambda p: p[0])
+    ranks = [0.0] * len(order)
+    i = 0
+    while i < len(order):
+        j = i
+        while j < len(order) and order[j][0] == order[i][0]:
+            j += 1
+        rank = (i + j - 1) / 2 + 1  # 1-based average rank for the tie group
+        for k in range(i, j):
+            ranks[k] = rank
+        i = j
+    rank_sum_pos = sum(r for r, (_, label) in zip(ranks, order, strict=True) if label == 1)
+    return (rank_sum_pos - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+
+
+def pr_auc(scores: list[float], labels: list[int]) -> float:
+    """Average precision (area under precision-recall curve). `scores` rank the
+    positive class (label 1). Returns 0.0 if no positives. Better than ROC-AUC
+    under heavy class imbalance; floor is the positive base rate."""
+    n_pos = sum(labels)
+    if not n_pos:
+        return 0.0
+    order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    tp = fp = 0
+    ap = 0.0
+    prev_recall = 0.0
+    for i in order:
+        if labels[i] == 1:
+            tp += 1
+        else:
+            fp += 1
+        recall = tp / n_pos
+        precision = tp / (tp + fp)
+        ap += (recall - prev_recall) * precision
+        prev_recall = recall
+    return ap
+
+
 def expected_calibration_error(
     scores: list[float], labels: list[int], n_bins: int = 10
 ) -> float:

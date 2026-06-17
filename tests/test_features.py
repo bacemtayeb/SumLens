@@ -21,9 +21,10 @@ def test_feature_rows_labels_and_missing_signals() -> None:
     classifier_out = {"sum-0000": (0.1, []), "sum-0001": (0.9, [(0, 4)])}
     failed = Claim(id="c", sentence_id="sum-0001", text="x")
     nli_out = {"sum-0000": (0.8, []), "sum-0001": (0.2, [failed])}
-    attribution_out = {"sum-0001": (0.3, ["src-0000"])}  # only the gated sentence has C
+    # support attribution: (attr_conc, attr_loo, top_source_ids); sum-0000 absent
+    support_out = {"sum-0001": (0.3, 0.15, ["src-0000"])}
 
-    rows = feature_rows(_summary(), ["sum-0001"], classifier_out, nli_out, attribution_out)
+    rows = feature_rows(_summary(), ["sum-0001"], classifier_out, nli_out, support_out)
 
     assert rows == [
         {
@@ -31,7 +32,8 @@ def test_feature_rows_labels_and_missing_signals() -> None:
             "sentence_id": "sum-0000",
             "classifier": 0.1,
             "nli": 0.8,
-            "attribution": None,  # C did not run for this sentence
+            "attr_conc": None,  # C did not run for this sentence
+            "attr_loo": None,
             "grounded": 1,
         },
         {
@@ -39,7 +41,8 @@ def test_feature_rows_labels_and_missing_signals() -> None:
             "sentence_id": "sum-0001",
             "classifier": 0.9,
             "nli": 0.2,
-            "attribution": 0.3,
+            "attr_conc": 0.3,
+            "attr_loo": 0.15,
             "grounded": 0,  # marked hallucinated in gold
         },
     ]

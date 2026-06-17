@@ -15,7 +15,7 @@ from pathlib import Path
 from sumlens.eval.ablation import ablation_table
 from sumlens.types import AnalysisConfig
 
-_COLUMNS = ["condition", "precision", "recall", "f1", "ece"]
+_COLUMNS = ["condition", "roc_auc", "pr_auc", "precision", "recall", "f1", "ece"]
 
 
 def _read(path: Path) -> list[dict[str, str]]:
