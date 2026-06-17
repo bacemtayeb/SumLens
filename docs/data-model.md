@@ -126,7 +126,7 @@ class AnalysisConfig(BaseModel):
 ## 3. Module interfaces — function signatures
 
 These are the only public functions each module exposes. Anything else is private.
-Stick to these signatures; if Claude Code drifts, point it back here.
+Stick to these signatures; if an implementation drifts, point it back here.
 
 ### `ingest.py`
 ```python
@@ -233,7 +233,7 @@ This CSV is the centrepiece table of the report.
 
 ---
 
-## 6. Order of implementation (Claude Code's worklist)
+## 6. Order of implementation
 
 1. `types.py` — write this first, completely. Everything else imports from it.
 2. `ingest.py` + tests against a fixture PDF and a fixture string.
@@ -248,4 +248,4 @@ This CSV is the centrepiece table of the report.
 11. `scripts/train_fusion.py` — fits the LR, pickles it, replaces the identity fusion.
 12. Real models swapped in last, one signal at a time, verifying on HPC.
 
-**Rule for Claude Code: never run the real models in tests.** Mock at the module boundary. Real-model runs happen only in `scripts/evaluate.py` on HPC.
+**Rule: never run the real models in tests.** Mock at the module boundary. Real-model runs happen only in `scripts/evaluate.py` on HPC.
