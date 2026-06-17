@@ -28,7 +28,7 @@ def feature_rows(
     hallucinated_ids: list[str],
     classifier_out: dict[str, tuple[float, list[tuple[int, int]]]],
     nli_out: dict[str, tuple[float, list[Claim]]],
-    support_out: dict[str, tuple[float, float, list[str]]],
+    support_out: dict[str, tuple[float, float, list[tuple[str, float]]]],
 ) -> list[dict[str, object]]:
     hallucinated = set(hallucinated_ids)
     rows: list[dict[str, object]] = []

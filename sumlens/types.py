@@ -44,6 +44,7 @@ class Evidence(BaseModel):
 
     failed_claims: list[Claim]                       # claims that failed NLI
     top_source_sentence_ids: list[str]               # top-k attributed source spans
+    source_support: list[tuple[str, float]] = []     # (source_id, entailment) graded heatmap
     classifier_token_spans: list[tuple[int, int]]    # char offsets in the summary sentence
     notes: list[str] = []                            # human-readable diagnostic strings
 
