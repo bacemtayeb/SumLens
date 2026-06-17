@@ -14,13 +14,19 @@ from pathlib import Path
 from sumlens.fuse import fit_fusion, fit_platt
 
 
+def _num(value: str, impute: float = 0.5) -> float:
+    # A signal column is empty when that signal was off for the run (e.g.
+    # attribution is off for RAGTruth). Impute neutral, matching the ablation.
+    return impute if value == "" else float(value)
+
+
 def _read(path: Path) -> tuple[list[list[float]], list[int]]:
     features: list[list[float]] = []
     grounded: list[int] = []
     with path.open(encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             features.append(
-                [float(row["classifier"]), float(row["nli"]), float(row["attribution"])]
+                [_num(row["classifier"]), _num(row["nli"]), _num(row["attribution"])]
             )
             grounded.append(int(row["grounded"]))
     return features, grounded

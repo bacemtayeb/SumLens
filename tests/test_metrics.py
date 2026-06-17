@@ -6,7 +6,9 @@ import pytest
 
 from sumlens.eval.metrics import (
     expected_calibration_error,
+    pr_auc,
     reliability_diagram,
+    roc_auc,
     sentence_f1,
 )
 
@@ -39,6 +41,38 @@ def test_ece_known_value() -> None:
 
 def test_ece_empty() -> None:
     assert expected_calibration_error([], []) == 0.0
+
+
+def test_roc_auc_perfect_separation() -> None:
+    assert roc_auc([0.1, 0.2, 0.8, 0.9], [0, 0, 1, 1]) == 1.0
+
+
+def test_roc_auc_inverted_is_zero() -> None:
+    assert roc_auc([0.9, 0.8, 0.2, 0.1], [0, 0, 1, 1]) == 0.0
+
+
+def test_roc_auc_ties_give_half() -> None:
+    # all scores equal -> every pair tied -> AUC 0.5
+    assert roc_auc([0.5, 0.5, 0.5, 0.5], [0, 1, 0, 1]) == 0.5
+
+
+def test_roc_auc_single_class_returns_zero() -> None:
+    assert roc_auc([0.1, 0.9], [1, 1]) == 0.0
+
+
+def test_pr_auc_perfect_separation() -> None:
+    assert pr_auc([0.1, 0.2, 0.8, 0.9], [0, 0, 1, 1]) == 1.0
+
+
+def test_pr_auc_floor_is_base_rate() -> None:
+    # scores carry no signal (descending but labels random) -> AP near base rate
+    assert pr_auc([0.4, 0.3, 0.2, 0.1], [1, 0, 0, 0]) == pytest.approx(1.0)
+    # worst ranking: the only positive is last -> precision 1/4 at recall 1
+    assert pr_auc([0.4, 0.3, 0.2, 0.1], [0, 0, 0, 1]) == pytest.approx(0.25)
+
+
+def test_pr_auc_no_positives_returns_zero() -> None:
+    assert pr_auc([0.1, 0.9], [0, 0]) == 0.0
 
 
 def test_reliability_diagram_writes_file(tmp_path: Path) -> None:
