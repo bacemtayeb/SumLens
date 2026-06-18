@@ -55,11 +55,28 @@ def test_support_concentration_and_loo(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = support_attribution(_document(), _summary(), AnalysisConfig())
 
-    conc, loo, top_ids = result["sum-0000"]
+    conc, loo, support = result["sum-0000"]
     # row = [0.9, 0.2, 0.1]: top1=0.9, top2=0.2, mean=0.4
     assert conc == pytest.approx(0.9 - 0.4)  # peak minus mean
     assert loo == pytest.approx(0.9 - 0.2)  # best-supporter margin
-    assert top_ids[0] == "src-0000"  # strongest supporting source first
+    # only src-0000 (0.9) clears the 0.5 floor; B (0.2) and C (0.1) are filtered out
+    assert len(support) == 1
+    assert support[0][0] == "src-0000"
+    assert support[0][1] == pytest.approx(0.9)
+
+
+def test_support_below_floor_returns_no_supporters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fabricated sentence (nothing in the source entails it) surfaces no supporters."""
+
+    class _FlatLowNLI:
+        def __call__(
+            self, pairs: list[dict[str, str]], top_k: object = None, batch_size: object = None
+        ) -> list[list[dict[str, object]]]:
+            return [[{"label": "entailment", "score": 0.2}] for _ in pairs]
+
+    monkeypatch.setattr(support_mod, "_get_nli", lambda model_name: _FlatLowNLI())
+    conc, loo, support = support_attribution(_document(), _summary(), AnalysisConfig())["sum-0000"]
+    assert support == []  # nothing clears the floor → empty heatmap
 
 
 def test_support_empty_source(monkeypatch: pytest.MonkeyPatch) -> None:

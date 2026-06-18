@@ -15,11 +15,12 @@ from pathlib import Path
 import pytest
 
 import app as app_mod
-from app import _export_json, run
+from app import _export_json, _source_spans, _summary_spans, run
 from sumlens import summarise as summarise_mod
 from sumlens.signals import attribution as attribution_mod
 from sumlens.signals import classifier as classifier_mod
 from sumlens.signals import nli as nli_mod
+from sumlens.signals import support as support_mod
 from sumlens.types import AnalysisResult
 
 _RAW = "Parliament passed a bill on Monday. The budget is one trillion euros."
@@ -76,6 +77,7 @@ def mocked_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(summarise_mod, "_get_summariser", _fake_summariser)
     monkeypatch.setattr(classifier_mod, "_get_detector", lambda model_path: _FakeDetector())
     monkeypatch.setattr(nli_mod, "_get_nli", lambda model_name: _FakeNLI())
+    monkeypatch.setattr(support_mod, "_get_nli", lambda model_name: _FakeNLI())
 
     def _fake_attr(
         source_text: str, target_text: str, cfg: object
@@ -87,29 +89,33 @@ def mocked_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_e2e_run_returns_analysis_result(mocked_pipeline: None) -> None:
-    result, source_html, highlighted, payload = run(_RAW, None)
+    result, payload = run(_RAW, None)
 
     assert isinstance(result, AnalysisResult)
     assert len(result.summary.sentences) == 2
-    assert len(highlighted) == 2
+    assert payload == result.model_dump()
 
 
-def test_e2e_highlighted_colors_match_verdicts(mocked_pipeline: None) -> None:
-    result, _, highlighted, _ = run(_RAW, None)
+def test_e2e_summary_span_colors_match_verdicts(mocked_pipeline: None) -> None:
+    result, _ = run(_RAW, None)
     verdict_map = {v.sentence_id: v.label for v in result.verdicts}
 
-    for (_, label), sentence in zip(highlighted, result.summary.sentences, strict=True):
-        assert label == verdict_map.get(sentence.id, "weak")
+    spans, ids = _summary_spans(result, verdict_map)
+    # Each span is its sentence's verdict colour, or the deep-red "flagged" sub-span.
+    for (_, label), sid in zip(spans, ids, strict=True):
+        assert label == verdict_map.get(sid, "weak") or label == "flagged"
 
 
-def test_e2e_source_html_contains_document_text(mocked_pipeline: None) -> None:
-    _, source_html, _, _ = run(_RAW, None)
-    assert "Parliament" in source_html
-    assert "budget" in source_html
+def test_e2e_source_spans_contain_document_text(mocked_pipeline: None) -> None:
+    result, _ = run(_RAW, None)
+    spans, _ = _source_spans(result.document, {})
+    joined = " ".join(text for text, _ in spans)
+    assert "Parliament" in joined
+    assert "budget" in joined
 
 
 def test_e2e_export_json_round_trips(mocked_pipeline: None) -> None:
-    result, _, _, _ = run(_RAW, None)
+    result, _ = run(_RAW, None)
     path = _export_json(result)
 
     assert path is not None
@@ -132,6 +138,7 @@ def test_e2e_no_real_model_weights_loaded(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(summarise_mod, "_get_summariser", _guard("_get_summariser"))
     monkeypatch.setattr(classifier_mod, "_get_detector", _guard("_get_detector"))
     monkeypatch.setattr(nli_mod, "_get_nli", _guard("_get_nli"))
+    monkeypatch.setattr(support_mod, "_get_nli", _guard("support._get_nli"))
     monkeypatch.setattr(
         attribution_mod, "_source_token_attributions", _guard("_source_token_attributions")
     )

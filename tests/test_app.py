@@ -6,10 +6,22 @@ from pathlib import Path
 import pytest
 
 import app as app_mod
-from app import _apply_tau, _export_json, _export_pdf, _render_source_html, _to_highlighted, run
+from app import (
+    _apply_tau,
+    _bidirectional_md,
+    _export_json,
+    _export_pdf,
+    _source_spans,
+    _split_on_spans,
+    _summary_spans,
+    _to_highlighted,
+    _why_panel_md,
+    run,
+)
 from sumlens.types import (
     AnalysisConfig,
     AnalysisResult,
+    Claim,
     Document,
     Evidence,
     Sentence,
@@ -48,6 +60,7 @@ def _result() -> AnalysisResult:
             evidence=Evidence(
                 failed_claims=[],
                 top_source_sentence_ids=["src-0000"],
+                source_support=[("src-0000", 0.92)],
                 classifier_token_spans=[],
             ),
         ),
@@ -57,8 +70,11 @@ def _result() -> AnalysisResult:
             label="hallucinated",
             signals=SignalScores(classifier=0.9, nli=0.2, attribution=0.3),
             evidence=Evidence(
-                failed_claims=[],
-                top_source_sentence_ids=["src-0001"],
+                failed_claims=[
+                    Claim(id="sum-0001-claim-1", sentence_id="sum-0001", text="Bad two.")
+                ],
+                top_source_sentence_ids=[],
+                source_support=[],
                 classifier_token_spans=[],
             ),
         ),
@@ -73,7 +89,7 @@ def _result() -> AnalysisResult:
 
 
 # ---------------------------------------------------------------------------
-# _to_highlighted
+# _to_highlighted / _summary_spans
 # ---------------------------------------------------------------------------
 
 
@@ -84,32 +100,105 @@ def test_to_highlighted() -> None:
     ]
 
 
-# ---------------------------------------------------------------------------
-# _render_source_html
-# ---------------------------------------------------------------------------
-
-
-def test_render_source_html_no_highlights() -> None:
+def test_summary_spans_id_map_one_per_sentence() -> None:
     result = _result()
-    html = _render_source_html(result.document, set())
-    assert "The bill passed." in html
-    assert "Budget is huge." in html
-    assert "<mark" not in html
+    labels = {v.sentence_id: v.label for v in result.verdicts}
+    spans, ids = _summary_spans(result, labels)
+    assert ids == ["sum-0000", "sum-0001"]
+    assert spans == [("Grounded one. ", "grounded"), ("Bad two. ", "hallucinated")]
 
 
-def test_render_source_html_highlights_given_ids() -> None:
+def test_summary_spans_splits_flagged_token_span() -> None:
     result = _result()
-    html = _render_source_html(result.document, {"src-0000"})
-    assert "<mark" in html
-    assert "The bill passed." in html
-    # only src-0000 is marked; src-0001 is plain text
-    assert html.index("<mark") < html.index("The bill passed.")
+    result.verdicts[1].evidence.classifier_token_spans = [(0, 3)]  # "Bad" in "Bad two."
+    labels = {v.sentence_id: v.label for v in result.verdicts}
+    spans, ids = _summary_spans(result, labels)
+    assert ("Bad", "flagged") in spans
+    # the flagged sub-span and its remainder both map back to the same sentence
+    assert ids.count("sum-0001") == 2
+    assert ids.count("sum-0000") == 1
 
 
-def test_render_source_html_no_sentences_falls_back_to_raw() -> None:
+# ---------------------------------------------------------------------------
+# _split_on_spans
+# ---------------------------------------------------------------------------
+
+
+def test_split_on_spans_no_spans_returns_whole() -> None:
+    assert _split_on_spans("hello world", []) == [("hello world", False)]
+
+
+def test_split_on_spans_marks_subspan() -> None:
+    assert _split_on_spans("Bad two.", [(0, 3)]) == [("Bad", True), (" two.", False)]
+
+
+def test_split_on_spans_merges_overlap_and_clamps() -> None:
+    assert _split_on_spans("abcdef", [(1, 3), (2, 4), (10, 20)]) == [
+        ("a", False),
+        ("bcd", True),
+        ("ef", False),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# _source_spans — graded heatmap
+# ---------------------------------------------------------------------------
+
+
+def test_source_spans_neutral_when_no_support() -> None:
+    spans, ids = _source_spans(_result().document, {})
+    assert ids == ["src-0000", "src-0001"]
+    assert all(label is None for _, label in spans)
+
+
+def test_source_spans_shades_by_strength() -> None:
+    spans, ids = _source_spans(_result().document, {"src-0000": 0.95, "src-0001": 0.6})
+    labels = {sid: label for (_, label), sid in zip(spans, ids, strict=True)}
+    assert labels["src-0000"] == "strong support"  # >= 0.80
+    assert labels["src-0001"] == "support"          # floor .. 0.80
+
+
+def test_source_spans_falls_back_to_raw_when_no_sentences() -> None:
     doc = Document(id="d", raw_text="Raw text only.", sentences=[], source="text")
-    html = _render_source_html(doc, set())
-    assert "Raw text only." in html
+    spans, ids = _source_spans(doc, {})
+    assert spans == [("Raw text only.", None)]
+    assert ids == []
+
+
+# ---------------------------------------------------------------------------
+# _why_panel_md — explanation + contrastive evidence
+# ---------------------------------------------------------------------------
+
+
+def test_why_panel_grounded_shows_best_source() -> None:
+    md = _why_panel_md(_result(), "sum-0000")
+    assert "GROUNDED" in md
+    assert "Best supporting source" in md
+    assert "The bill passed." in md
+
+
+def test_why_panel_hallucinated_shows_no_support_and_failed_claim() -> None:
+    md = _why_panel_md(_result(), "sum-0001")
+    assert "HALLUCINATED" in md
+    assert "No supporting source found" in md
+    assert "Bad two." in md  # the failed claim text
+
+
+# ---------------------------------------------------------------------------
+# _bidirectional_md — source → summary links
+# ---------------------------------------------------------------------------
+
+
+def test_bidirectional_lists_grounded_summary_sentences() -> None:
+    md = _bidirectional_md(_result(), "src-0000")
+    assert "Source sentence" in md
+    assert "The bill passed." in md
+    assert "Grounded one." in md  # src-0000 grounds sum-0000
+
+
+def test_bidirectional_no_links() -> None:
+    md = _bidirectional_md(_result(), "src-0001")  # grounds nothing
+    assert "does not strongly support" in md.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +214,10 @@ def test_run_text_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_mod, "load_text", lambda text: text_doc)
     monkeypatch.setattr(app_mod, "analyse", lambda document, cfg: canned)
 
-    result, source_html, highlighted, payload = run("Some pasted source text.", None)
+    result, payload = run("Some pasted source text.", None)
 
-    assert highlighted == [("Grounded one. ", "grounded"), ("Bad two. ", "hallucinated")]
-    assert payload == canned.model_dump()
-    assert "Some pasted source text" in source_html
     assert result == canned
+    assert payload == canned.model_dump()
 
 
 def test_run_prefers_pdf_when_given(
@@ -179,57 +266,7 @@ def test_run_rejects_oversized_pdf(
 
 
 # ---------------------------------------------------------------------------
-# F3 — click-to-highlight source spans
-# ---------------------------------------------------------------------------
-
-
-class _FakeSelectEvent:
-    """Minimal stand-in for gr.SelectData."""
-
-    def __init__(self, index: int) -> None:
-        self.index = index
-
-
-def test_on_sentence_select_highlights_top_source_ids(monkeypatch: pytest.MonkeyPatch) -> None:
-    result = _result()
-    # Access the inner function via build_app — easier to test the logic directly
-    # by calling _render_source_html with the expected IDs (unit testing the helper).
-    verdict = result.verdicts[1]  # hallucinated, top_source = ["src-0001"]
-    html = _render_source_html(result.document, set(verdict.evidence.top_source_sentence_ids))
-    assert "<mark" in html
-    assert "Budget is huge." in html  # src-0001 text
-
-
-def test_on_sentence_select_switches_highlight_on_second_click() -> None:
-    result = _result()
-    # Click sentence 0 → src-0000 highlighted
-    html0 = _render_source_html(result.document, {"src-0000"})
-    # Click sentence 1 → src-0001 highlighted
-    html1 = _render_source_html(result.document, {"src-0001"})
-
-    assert "The bill passed." in html0
-    assert html0.count("<mark") == 1
-
-    assert "Budget is huge." in html1
-    assert html1.count("<mark") == 1
-
-    # The two outputs must differ (different sentence highlighted each time)
-    assert html0 != html1
-
-
-def test_on_sentence_select_out_of_range_returns_plain_source() -> None:
-    result = _result()
-    html = _render_source_html(result.document, set())
-    assert "<mark" not in html
-
-
-# ---------------------------------------------------------------------------
-# F5 — export JSON
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# F4 — adjustable threshold τ
+# F4 — adjustable threshold τ (re-labels without re-running the model)
 # ---------------------------------------------------------------------------
 
 
@@ -238,36 +275,27 @@ def test_apply_tau_returns_none_without_result() -> None:
 
 
 def test_apply_tau_mirrors_fuse_label_logic() -> None:
-    result = _result()
-    # fused_score=0.9 → grounded at any reasonable tau
-    # fused_score=0.1 → hallucinated at any reasonable tau
-    spans = _apply_tau(result, 0.70, 0.30)
+    spans = _apply_tau(_result(), 0.70, 0.30)
     assert spans is not None
     assert spans[0] == ("Grounded one. ", "grounded")
     assert spans[1] == ("Bad two. ", "hallucinated")
 
 
 def test_apply_tau_relabels_without_model_rerun() -> None:
-    result = _result()
-    # Raise tau_grounded to 0.95 → fused_score=0.9 falls into "weak"
-    spans = _apply_tau(result, 0.95, 0.30)
+    spans = _apply_tau(_result(), 0.95, 0.30)
     assert spans is not None
-    assert spans[0][1] == "weak"       # was grounded, now weak
-    assert spans[1][1] == "hallucinated"  # unchanged
+    assert spans[0][1] == "weak"           # fused 0.9 now below tau_grounded 0.95
+    assert spans[1][1] == "hallucinated"   # unchanged
 
 
 def test_apply_tau_boundary_score_lt_tau_h_is_hallucinated() -> None:
-    result = _result()
-    # fused_score=0.1 < tau_hallucinated=0.15 → hallucinated
-    spans = _apply_tau(result, 0.70, 0.15)
+    spans = _apply_tau(_result(), 0.70, 0.15)
     assert spans is not None
     assert spans[1][1] == "hallucinated"
 
 
 def test_apply_tau_boundary_score_gte_tau_g_is_grounded() -> None:
-    result = _result()
-    # fused_score=0.9 >= tau_grounded=0.85 → grounded
-    spans = _apply_tau(result, 0.85, 0.30)
+    spans = _apply_tau(_result(), 0.85, 0.30)
     assert spans is not None
     assert spans[0][1] == "grounded"
 
