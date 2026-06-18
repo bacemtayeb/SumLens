@@ -1,6 +1,7 @@
 # SumLens
 
 ![CI](https://github.com/bacemtayeb/SumLens/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 Explainability dashboard for AI-generated summaries. Upload a document, get an
 abstractive summary, and see — sentence by sentence — how strongly each summary
@@ -204,4 +205,4 @@ docs/               # requirements, data model, research plan
 
 ## License
 
-TBD.
+Released under the [MIT License](LICENSE).
