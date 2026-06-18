@@ -1,8 +1,14 @@
 """Pipeline orchestration — Document into a full AnalysisResult.
 
 Stages: summarise -> signal A (classifier) and signal B (NLI) -> gate signal C
-(attribution) on the sentences A or B flag as suspicious -> fuse -> calibrate ->
-label -> assemble evidence. Each stage is timed into `timings_ms`.
+(Inseq attribution) on the sentences A or B flag as suspicious -> generator-agnostic
+support attribution over *every* sentence (the graded source heatmap) -> fuse ->
+calibrate -> label -> assemble evidence. Each stage is timed into `timings_ms`.
+
+Two attribution signals coexist by design: the gated Inseq score stays the fusion
+feature (so the trained model is untouched), while ungated NLI-matrix `support`
+drives the per-sentence heatmap — populated for grounded sentences too, and empty
+for sentences the source does not entail. See `signals/support.py`.
 
 A and B run sequentially here; the data-model calls for them "in parallel", which
 is a latency optimisation, not a correctness requirement, so it is deferred.
@@ -17,6 +23,7 @@ from sumlens.fuse import calibrate, fuse, label
 from sumlens.signals.attribution import attribute
 from sumlens.signals.classifier import classify
 from sumlens.signals.nli import entail, extract_claims
+from sumlens.signals.support import support_attribution
 from sumlens.summarise import summarise
 from sumlens.types import (
     AnalysisConfig,
@@ -46,15 +53,19 @@ def analyse(document: Document, cfg: AnalysisConfig) -> AnalysisResult:
 
     gated = _gated_summary(summary, classifier_out, nli_out)
     attribution_out = _timed(timings, "attribute", lambda: attribute(document, gated, cfg))
+    support_out = _timed(timings, "support", lambda: support_attribution(document, summary, cfg))
 
     signals: dict[str, SignalScores] = {}
-    evidence_parts: dict[str, tuple[list[tuple[int, int]], list[Claim], list[str]]] = {}
+    evidence_parts: dict[
+        str, tuple[list[tuple[int, int]], list[Claim], list[tuple[str, float]]]
+    ] = {}
     for sentence in summary.sentences:
         a_score, a_spans = classifier_out[sentence.id]
         b_score, b_failed = nli_out.get(sentence.id, (None, []))
-        c_peak, c_top = attribution_out.get(sentence.id, (None, []))
+        c_peak, _ = attribution_out.get(sentence.id, (None, []))
+        _, _, support = support_out.get(sentence.id, (0.0, 0.0, []))
         signals[sentence.id] = SignalScores(classifier=a_score, nli=b_score, attribution=c_peak)
-        evidence_parts[sentence.id] = (a_spans, b_failed, c_top)
+        evidence_parts[sentence.id] = (a_spans, b_failed, support)
 
     fused = _timed(
         timings,
@@ -64,7 +75,7 @@ def analyse(document: Document, cfg: AnalysisConfig) -> AnalysisResult:
 
     verdicts = []
     for sentence in summary.sentences:
-        a_spans, b_failed, c_top = evidence_parts[sentence.id]
+        a_spans, b_failed, support = evidence_parts[sentence.id]
         score = fused[sentence.id]
         verdicts.append(
             SentenceVerdict(
@@ -74,7 +85,8 @@ def analyse(document: Document, cfg: AnalysisConfig) -> AnalysisResult:
                 signals=signals[sentence.id],
                 evidence=Evidence(
                     failed_claims=b_failed,
-                    top_source_sentence_ids=c_top,
+                    top_source_sentence_ids=[sid for sid, _ in support],
+                    source_support=support,
                     classifier_token_spans=a_spans,
                 ),
             )

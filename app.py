@@ -6,8 +6,8 @@ input, runs the pipeline, and shapes the result for display.
 
 from __future__ import annotations
 
-import html as _html
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -19,10 +19,17 @@ _LABEL_COLORS: dict[str, str] = {
     "grounded": "green",
     "weak": "orange",
     "hallucinated": "red",
+    "flagged": "#7f1d1d",  # detector-flagged token span inside a sentence (deep red)
 }
+# Source heatmap: support strength binned into two visible levels (+ neutral = unlabeled).
+_SUPPORT_COLORS: dict[str, str] = {
+    "strong support": "#f59e0b",  # entailment >= _STRONG_SUPPORT
+    "support": "#fde68a",         # floor <= entailment < _STRONG_SUPPORT
+}
+_STRONG_SUPPORT = 0.80
 _MAX_WORDS = 10_000
 _MAX_PDF_BYTES = 5 * 1024 * 1024  # 5 MB
-_SOURCE_PLACEHOLDER = "<p><em>Load a document to see the source text here.</em></p>"
+_WHY_PLACEHOLDER = "_Click a summary sentence to see why it was scored the way it was._"
 
 
 def _validate_text(text: str) -> str:
@@ -37,27 +44,161 @@ def _validate_text(text: str) -> str:
     return text
 
 
-def _to_highlighted(result: AnalysisResult) -> list[tuple[str, str]]:
-    """Summary sentences as (text, label) spans for gr.HighlightedText colour bands."""
-    labels = {v.sentence_id: v.label for v in result.verdicts}
-    return [(f"{s.text} ", labels.get(s.id, "weak")) for s in result.summary.sentences]
-
-
-def _render_source_html(document: Document, highlighted_ids: set[str]) -> str:
-    """Source sentences as HTML; sentences in highlighted_ids get a yellow mark."""
-    if not document.sentences:
-        return f"<p style='line-height:1.8'>{_html.escape(document.raw_text)}</p>"
-    parts = []
-    for sentence in document.sentences:
-        safe = _html.escape(sentence.text)
-        if sentence.id in highlighted_ids:
-            parts.append(
-                f"<mark style='background:#fde68a;border-radius:3px;"
-                f"padding:1px 3px'>{safe}</mark>"
-            )
+def _merge_spans(spans: list[tuple[int, int]], length: int) -> list[tuple[int, int]]:
+    """Clamp char spans to [0, length], drop empties, sort, and merge overlaps."""
+    cleaned = sorted(
+        (max(0, s), min(length, e)) for s, e in spans if s < e and s < length and e > 0
+    )
+    merged: list[tuple[int, int]] = []
+    for start, end in cleaned:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
-            parts.append(safe)
-    return "<p style='line-height:1.8'>" + " ".join(parts) + "</p>"
+            merged.append((start, end))
+    return merged
+
+
+def _split_on_spans(text: str, spans: list[tuple[int, int]]) -> list[tuple[str, bool]]:
+    """Split `text` into (segment, is_flagged) pieces at the given char spans."""
+    merged = _merge_spans(spans, len(text))
+    if not merged:
+        return [(text, False)]
+    pieces: list[tuple[str, bool]] = []
+    cursor = 0
+    for start, end in merged:
+        if start > cursor:
+            pieces.append((text[cursor:start], False))
+        pieces.append((text[start:end], True))
+        cursor = end
+    if cursor < len(text):
+        pieces.append((text[cursor:], False))
+    return pieces
+
+
+def _summary_spans(
+    result: AnalysisResult, labels: Mapping[str, str]
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """gr.HighlightedText spans for the summary + a parallel span->sentence-id map.
+
+    Each sentence is coloured by its (possibly re-thresholded) label; detector-flagged
+    token spans within it become separate `flagged` spans so the exact fabricated
+    phrase stands out. The id map lets the click handler recover which sentence a
+    clicked span belongs to even when a sentence is split into several spans.
+    """
+    verdicts = {v.sentence_id: v for v in result.verdicts}
+    spans: list[tuple[str, str]] = []
+    span_ids: list[str] = []
+    for sentence in result.summary.sentences:
+        label = labels.get(sentence.id, "weak")
+        verdict = verdicts.get(sentence.id)
+        token_spans = verdict.evidence.classifier_token_spans if verdict else []
+        pieces = _split_on_spans(sentence.text, token_spans)
+        for k, (segment, flagged) in enumerate(pieces):
+            text = segment + (" " if k == len(pieces) - 1 else "")
+            spans.append((text, "flagged" if flagged else label))
+            span_ids.append(sentence.id)
+    return spans, span_ids
+
+
+def _to_highlighted(result: AnalysisResult) -> list[tuple[str, str]]:
+    """Summary spans coloured by each sentence's verdict label (the initial view)."""
+    labels = {v.sentence_id: v.label for v in result.verdicts}
+    return _summary_spans(result, labels)[0]
+
+
+def _source_spans(
+    document: Document, support: Mapping[str, float]
+) -> tuple[list[tuple[str, str | None]], list[str]]:
+    """gr.HighlightedText spans for the source: each sentence shaded by support strength.
+
+    `support` maps source-sentence id -> entailment (0..1). Sentences absent from it
+    get a `None` label (neutral, no highlight). Returns spans + a parallel
+    span->source-id map so a clicked source sentence can be identified.
+    """
+    if not document.sentences:
+        return [(document.raw_text, None)], []
+    spans: list[tuple[str, str | None]] = []
+    span_ids: list[str] = []
+    for sentence in document.sentences:
+        score = support.get(sentence.id)
+        if score is None:
+            label: str | None = None
+        elif score >= _STRONG_SUPPORT:
+            label = "strong support"
+        else:
+            label = "support"
+        spans.append((sentence.text + " ", label))
+        span_ids.append(sentence.id)
+    return spans, span_ids
+
+
+def _signal_bar(score: float | None) -> str:
+    """A tiny text meter for a 0..1 signal score (None = signal did not run)."""
+    if score is None:
+        return "—"
+    filled = round(score * 10)
+    return "█" * filled + "░" * (10 - filled) + f"  {score:.2f}"
+
+
+def _why_panel_md(result: AnalysisResult, sentence_id: str) -> str:
+    """Explain one summary sentence: signal scores, best supporting source, failed claims."""
+    verdict = next((v for v in result.verdicts if v.sentence_id == sentence_id), None)
+    if verdict is None:
+        return _WHY_PLACEHOLDER
+    sentence = next((s for s in result.summary.sentences if s.id == sentence_id), None)
+    sources = {s.id: s.text for s in result.document.sentences}
+    s = verdict.signals
+    lines = [
+        f"**{verdict.label.upper()}** · fused score `{verdict.fused_score:.2f}`",
+        f"> {sentence.text if sentence else sentence_id}",
+        "",
+        "| Signal | Score |",
+        "| --- | --- |",
+        f"| A · hallucination classifier | `{_signal_bar(s.classifier)}` |",
+        f"| B · NLI entailment | `{_signal_bar(s.nli)}` |",
+        f"| C · attribution (gated) | `{_signal_bar(s.attribution)}` |",
+        "",
+    ]
+    support = verdict.evidence.source_support
+    if support:
+        top_id, top_score = support[0]
+        lines += [
+            f"**Best supporting source** — {top_score:.0%} entailment:",
+            f"> {sources.get(top_id, top_id)}",
+        ]
+    else:
+        lines.append(
+            "**No supporting source found** — nothing in the document entails this sentence."
+        )
+    if verdict.evidence.failed_claims:
+        lines += ["", "**Claims that failed verification:**"]
+        lines += [f"- {c.text}" for c in verdict.evidence.failed_claims]
+    return "\n".join(lines)
+
+
+def _source_to_summary(result: AnalysisResult) -> dict[str, list[tuple[str, float]]]:
+    """Transpose source_support: source-sentence id -> [(summary sentence id, score)] desc."""
+    rev: dict[str, list[tuple[str, float]]] = {}
+    for verdict in result.verdicts:
+        for src_id, score in verdict.evidence.source_support:
+            rev.setdefault(src_id, []).append((verdict.sentence_id, score))
+    for pairs in rev.values():
+        pairs.sort(key=lambda pair: pair[1], reverse=True)
+    return rev
+
+
+def _bidirectional_md(result: AnalysisResult, source_id: str) -> str:
+    """Reverse view: which summary sentences a clicked source sentence grounds."""
+    sources = {s.id: s.text for s in result.document.sentences}
+    summaries = {s.id: s.text for s in result.summary.sentences}
+    grounded = _source_to_summary(result).get(source_id, [])
+    lines = ["**Source sentence**", f"> {sources.get(source_id, source_id)}", ""]
+    if grounded:
+        lines.append("Grounds these summary sentences:")
+        lines += [f"- ({score:.0%}) {summaries.get(sid, sid)}" for sid, score in grounded]
+    else:
+        lines.append("_Does not strongly support any summary sentence._")
+    return "\n".join(lines)
 
 
 def _apply_tau(
@@ -68,7 +209,6 @@ def _apply_tau(
     """Re-label summary sentences from stored fused scores without re-running the model."""
     if result is None:
         return None
-    scores = {v.sentence_id: v.fused_score for v in result.verdicts}
 
     def _label(score: float) -> str:
         if score < tau_hallucinated:
@@ -77,7 +217,15 @@ def _apply_tau(
             return "grounded"
         return "weak"
 
-    return [(f"{s.text} ", _label(scores.get(s.id, 0.5))) for s in result.summary.sentences]
+    labels = {v.sentence_id: _label(v.fused_score) for v in result.verdicts}
+    # Token spans are unchanged by re-thresholding, so the span->id map stays valid.
+    return _summary_spans(result, labels)[0]
+
+
+def _event_index(evt: Any) -> int:
+    """Extract a flat int index from a gr.SelectData event (index may be int or seq)."""
+    index = evt.index
+    return int(index[0] if isinstance(index, (list, tuple)) else index)
 
 
 def _latin1(text: str) -> str:
@@ -184,10 +332,7 @@ def _export_json(result: AnalysisResult | None) -> str | None:
     return tmp.name
 
 
-def run(
-    text: str,
-    pdf_file: str | None,
-) -> tuple[AnalysisResult, str, list[tuple[str, str]], dict[str, Any]]:
+def run(text: str, pdf_file: str | None) -> tuple[AnalysisResult, dict[str, Any]]:
     if pdf_file:
         path = Path(pdf_file)
         if path.stat().st_size > _MAX_PDF_BYTES:
@@ -200,8 +345,7 @@ def run(
         document = load_text(_validate_text(text))
 
     result = analyse(document, AnalysisConfig())
-    source_html = _render_source_html(document, set())
-    return result, source_html, _to_highlighted(result), result.model_dump()
+    return result, result.model_dump()
 
 
 def build_app() -> Any:
@@ -212,25 +356,38 @@ def build_app() -> Any:
             "# SumLens — Summary Faithfulness Dashboard\n"
             "Paste text or upload a PDF. SumLens summarises it and flags sentences "
             "that may be hallucinated.\n\n"
-            "**Green** = grounded · **Orange** = weakly grounded · **Red** = hallucinated  \n"
-            "Click a summary sentence to highlight its attributed source spans."
+            "**Green** = grounded · **Orange** = weakly grounded · **Red** = hallucinated · "
+            "**dark red** = the exact flagged phrase.  \n"
+            "**Click a summary sentence** to light up its supporting source sentences and "
+            "see why it scored that way. **Click a source sentence** to see which summary "
+            "sentences it grounds."
         )
 
         result_state: gr.State = gr.State(value=None)
+        summary_ids_state: gr.State = gr.State(value=[])
+        source_ids_state: gr.State = gr.State(value=[])
 
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### Source document")
-                source_html_out = gr.HTML(value=_SOURCE_PLACEHOLDER)
+                source_out = gr.HighlightedText(
+                    label="Source (shaded by how strongly each sentence supports the selection)",
+                    color_map=_SUPPORT_COLORS,
+                    combine_adjacent=False,
+                    show_legend=True,
+                )
 
             with gr.Column():
                 gr.Markdown("### Summary with faithfulness highlights")
                 summary_out = gr.HighlightedText(
-                    label="Summary (click a sentence to highlight source spans)",
+                    label="Summary (click a sentence to explain it and highlight its source)",
                     color_map=_LABEL_COLORS,
                     combine_adjacent=False,
                     show_legend=True,
                 )
+
+        with gr.Accordion("Why this verdict?", open=True):
+            why_panel = gr.Markdown(value=_WHY_PLACEHOLDER)
 
         with gr.Row():
             tau_h_slider = gr.Slider(
@@ -264,17 +421,22 @@ def build_app() -> Any:
         with gr.Accordion("Full result (JSON viewer)", open=False):
             json_out = gr.JSON(label="AnalysisResult")
 
-        def _handle(
-            text: str, pdf_file: str | None
-        ) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+        def _handle(text: str, pdf_file: str | None) -> tuple[Any, ...]:
             try:
-                result, source_html, highlighted, payload = run(text, pdf_file)
+                result, payload = run(text, pdf_file)
+                summary_spans, summary_ids = _summary_spans(
+                    result, {v.sentence_id: v.label for v in result.verdicts}
+                )
+                source_spans, source_ids = _source_spans(result.document, {})
                 json_path = _export_json(result)
                 pdf_path = _export_pdf(result)
                 return (
                     result,
-                    source_html,
-                    highlighted,
+                    summary_spans,
+                    summary_ids,
+                    source_spans,
+                    source_ids,
+                    _WHY_PLACEHOLDER,
                     payload,
                     gr.update(value=json_path, visible=True),
                     gr.update(value=pdf_path, visible=True),
@@ -283,33 +445,42 @@ def build_app() -> Any:
                 )
             except ValueError as exc:
                 return (
-                    None,
-                    _SOURCE_PLACEHOLDER,
-                    None,
-                    None,
+                    None, [], [], [], [], _WHY_PLACEHOLDER, None,
                     gr.update(visible=False),
                     gr.update(visible=False),
                     gr.update(value=f"**Error:** {exc}", visible=True),
                     gr.update(interactive=True),
                 )
 
-        def _on_sentence_select(
-            evt: Any, result: AnalysisResult | None
-        ) -> str:
+        def _on_summary_select(
+            result: AnalysisResult | None, summary_ids: list[str], evt: gr.SelectData
+        ) -> tuple[list[tuple[str, str | None]], str]:
             if result is None:
-                return _SOURCE_PLACEHOLDER
-            idx: int = int(evt.index)
-            sentences = result.summary.sentences
-            if idx >= len(sentences):
-                return _render_source_html(result.document, set())
-            sentence_id = sentences[idx].id
-            verdict = next(
-                (v for v in result.verdicts if v.sentence_id == sentence_id), None
-            )
-            highlighted = (
-                set(verdict.evidence.top_source_sentence_ids) if verdict else set()
-            )
-            return _render_source_html(result.document, highlighted)
+                return [], _WHY_PLACEHOLDER
+            idx = _event_index(evt)
+            if idx < 0 or idx >= len(summary_ids):
+                return _source_spans(result.document, {})[0], _WHY_PLACEHOLDER
+            sentence_id = summary_ids[idx]
+            verdict = next((v for v in result.verdicts if v.sentence_id == sentence_id), None)
+            support = dict(verdict.evidence.source_support) if verdict else {}
+            return _source_spans(result.document, support)[0], _why_panel_md(result, sentence_id)
+
+        def _on_source_select(
+            result: AnalysisResult | None, source_ids: list[str], evt: gr.SelectData
+        ) -> str:
+            if result is None or not source_ids:
+                return _WHY_PLACEHOLDER
+            idx = _event_index(evt)
+            if idx < 0 or idx >= len(source_ids):
+                return _WHY_PLACEHOLDER
+            return _bidirectional_md(result, source_ids[idx])
+
+        # `gr.SelectData` is a string annotation under PEP 563 (from __future__ import
+        # annotations) and gradio is imported inside this function, not at module level,
+        # so Gradio cannot resolve the string to detect the event-data parameter and
+        # passes evt=None. Inject the real class so the click events populate `evt`.
+        _on_summary_select.__annotations__["evt"] = gr.SelectData
+        _on_source_select.__annotations__["evt"] = gr.SelectData
 
         submit.click(
             fn=lambda: gr.update(interactive=False),
@@ -319,15 +490,22 @@ def build_app() -> Any:
             fn=_handle,
             inputs=[text_in, pdf_in],
             outputs=[
-                result_state, source_html_out, summary_out,
+                result_state, summary_out, summary_ids_state,
+                source_out, source_ids_state, why_panel,
                 json_out, json_dl, pdf_dl, error_box, submit,
             ],
         )
 
         summary_out.select(
-            fn=_on_sentence_select,
-            inputs=[result_state],
-            outputs=[source_html_out],
+            fn=_on_summary_select,
+            inputs=[result_state, summary_ids_state],
+            outputs=[source_out, why_panel],
+        )
+
+        source_out.select(
+            fn=_on_source_select,
+            inputs=[result_state, source_ids_state],
+            outputs=[why_panel],
         )
 
         for slider in (tau_h_slider, tau_g_slider):
