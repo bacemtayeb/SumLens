@@ -12,8 +12,19 @@ potential hallucinations.
 
 ---
 
+## Demo
+
+[![Watch the SumLens demo](docs/demo-thumbnail.png)](https://youtu.be/U30Zmb0N2hM)
+
+▶️ **[Watch the demo on YouTube](https://youtu.be/U30Zmb0N2hM)** — a faithful
+summary scored all-green, a hallucinated sentence flagged red with its source
+evidence, adjustable thresholds, and JSON/PDF export.
+
+---
+
 ## Contents
 
+- [Demo](#demo)
 - [What SumLens does](#what-sumlens-does)
 - [Hardware requirements](#hardware-requirements)
 - [Installation](#installation)
